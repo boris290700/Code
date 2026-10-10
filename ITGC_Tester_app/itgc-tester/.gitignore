@@ -1,0 +1,12 @@
+# Never commit real client evidence or workpapers.
+# Put real extracts in a folder called real_data/ (ignored below).
+real_data/
+workpapers/
+*_workpaper_*.xlsx
+ITGC_workpaper_*.xlsx
+ITGC_evaluation*.xlsx
+itgc_settings*.json
+
+# System files
+.DS_Store
+Thumbs.db
