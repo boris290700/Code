@@ -10,3 +10,6 @@ itgc_settings*.json
 # System files
 .DS_Store
 Thumbs.db
+
+# Excel lock files
+~$*

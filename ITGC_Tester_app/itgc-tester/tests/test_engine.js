@@ -1,5 +1,7 @@
 // Automated check: run the engine on the synthetic dataset and compare with the answer key.
 // Run with:  node tests/test_engine.js
+// How the tests work: each "ok(condition, message)" line checks one expected fact and prints
+// PASS or FAIL. If anything fails, the script ends with an error, so a broken rule is noticed.
 const fs = require('fs'), path = require('path');
 const X = require('../src/xlsx.js'), I = require('../src/engine.js');
 const dir = path.join(__dirname, '..', 'sample_data');
@@ -7,6 +9,7 @@ let failures = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m
 (async () => {
   const sheets = await X.readXlsx(fs.readFileSync(path.join(dir, 'ITGC_synthetic_evidence_FY2025.xlsx')));
   const key = Object.values(await X.readXlsx(fs.readFileSync(path.join(dir, 'ITGC_answer_key_FY2025_CONFIDENTIAL.xlsx'))))[0];
+  // Map the demo data with the default settings and check that nothing is missing.
   const S = I.clone(I.DEFAULT_SETTINGS);
   const { entities, issues } = I.mapEntities(sheets, S);
   ok(issues.filter(i => i.level !== 'info').length === 0, 'all evidence mapped without warnings');
@@ -15,6 +18,7 @@ let failures = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m
   const run = await I.runControls(entities, S);
   const pops = run.populations;
   ok(pops.C1 === 110 && pops.C2 === 85 && pops.C3 === 409 && pops.C4 === 240 && pops.C5 === 240 && pops.C6 === 55, 'populations ' + JSON.stringify(pops));
+  // Compare the tool's results with the answer key: every seeded deviation found, no false alarms.
   const ev = I.evaluateAutomated(run, key);
   console.table(ev.map(e => ({ C: e.Control, Pop: e.Population, Key: e['Deviations in key'], TP: e.TP, FP: e.FP, FN: e.FN, P: e.Precision?.toFixed(2), R: e.Recall?.toFixed(2) })));
   ok(ev.every(e => e.FN === 0), 'recall 100% on all controls (keyword mode)');
