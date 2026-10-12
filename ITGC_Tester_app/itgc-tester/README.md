@@ -9,6 +9,35 @@ Version 2 adds:
 - testing a single control or any selection of controls;
 - the Big4-style workpaper.
 
+Version 2.1 (review hardening) closes gaps a senior reviewer would raise:
+- **No false PASS:**
+  - Keywords must start a word, so "UAT" no longer matches "evaluation".
+  - A positive word next to a negation ("UAT not performed") goes to REVIEW.
+  - An item where nothing could be tested is NOT TESTED, not PASS.
+  - A leaver still active close to period end goes to REVIEW.
+- **New rule elements:**
+  - C1: an empty creator goes to REVIEW.
+  - C3: approval is checked per profile.
+  - C4: approval by the developer is an exception, and emergency post-approval must come within *N* days.
+  - Duplicates with different content go to REVIEW.
+  - Users without a user type stay in the population.
+- **Safety stops:**
+  - A blank or reversed audit period stops the run.
+  - An empty population is never reported as "no exceptions".
+  - Day/month order that was only assumed is a WARNING.
+  - Settings that make a rule meaningless are reported.
+- **Workpaper:**
+  - tool-reliance statement and results fingerprint;
+  - population completeness risks per control;
+  - who decided each item and when;
+  - "Not an exception" needs a reason;
+  - review sign-off left empty for the reviewer;
+  - tool-output sheets protected against accidental edits.
+- **Data protection:**
+  - Decisions are kept per engagement.
+  - **Start a new engagement** deletes everything stored in the browser.
+  - A language model that is not on this computer needs explicit confirmation, and the run log records it.
+
 ---
 
 ## 1. Opening the app
@@ -32,7 +61,7 @@ New here? **[GETTING_STARTED.md](GETTING_STARTED.md)** has step-by-step setup fo
 | 6. Review & export | Decide on every EXCEPTION and REVIEW item. Then **export the workpaper for each control**, or all of them. |
 | 7. Evaluate | For the experiment: load the answer key and the manual testers' results to get the metrics. |
 
-Your settings, decisions and run history are remembered in this browser. If you run the tests again, decisions are carried over for items whose tool result hasn't changed. Export the workpaper and the settings file to keep them.
+Your settings, decisions and run history are remembered in this browser. Decisions are saved per engagement (client and period). After a page reload, load the same files and run again, and your decisions come back for every item whose tool result hasn't changed. Each decision records who made it and when. **Start a new engagement** (step 1) deletes everything the app stored in the browser, so one client's approver lists, user IDs and comments never carry over to the next client. Export the workpaper and the settings file to keep them.
 
 ## 3. The controls, attributes and rules
 
@@ -42,8 +71,8 @@ Each control is tested as a set of attributes (A, B, C…), the way an audit tes
 |---|---|---|---|
 | C1 | New user access approved before creation | A request exists · B request approved · C authorised, independent approver · D approved before creation | User master, access request tickets |
 | C2 | Leavers' access removed timely | A user account identified · B access removed within *N* days · C no logon after termination | HR list, user master, lock history (optional) |
-| C3 | Privileged access restricted | A no unapproved privileged profile | User master, profiles/roles, approved list (optional) |
-| C4 | Changes approved and tested before import | A change ticket exists · B approved before import (emergency: after) · C user acceptance testing evidenced | Transports, change tickets |
+| C3 | Privileged access restricted | A no unapproved privileged profile (checked per profile when the approved list names profiles) | User master, profiles/roles, approved list (optional) |
+| C4 | Changes approved and tested before import | A change ticket exists · B approved before import, not by the developer (emergency: within *N* days after) · C user acceptance testing evidenced | Transports, change tickets |
 | C5 | Developers do not import own changes | A importer is not the developer | Transports |
 | C6 | Failed jobs followed up | A incident logged · B incident resolved · C resolution documented | Job runs, incidents |
 
@@ -59,7 +88,12 @@ Each control is tested as a set of attributes (A, B, C…), the way an audit tes
 
 The rule of thumb behind EXCEPTION versus REVIEW: **missing approval is an exception; a missing supporting detail when approval is evidenced goes to review.** All rules are in `src/engine.js`, section 8, one block per control.
 
-**Free text** (C4 test evidence, C6 resolution, C1 approval comments) is assessed with keyword rules (default) or a local language model. With a model, an ADEQUATE answer must quote the evidence, and items where several runs disagree go to REVIEW.
+**Item result.** The worst attribute decides the item result. An item where *no* attribute could be tested (all N/T) is **NOT TESTED**, never PASS, and you must test it manually. If an attribute is only partly testable (for example C1-C when the extract has no "created by"), the rest is still tested and the missing part appears as a limitation on the run screen and the leadsheet.
+
+**Free text** (C4 test evidence, C6 resolution, C1 approval comments) is assessed with keyword rules (default) or a local language model.
+- A keyword must start a word: "UAT" is found in "UAT passed" but not in "evaluation".
+- Positive wording together with a negation word ("UAT not performed", "no UAT", "UAT pending") is UNCLEAR and goes to REVIEW. You can edit the negation list in Settings.
+- With a model, an ADEQUATE answer must quote the evidence. Items where several runs disagree go to REVIEW, and so do items where the model says ADEQUATE but the keyword rules say INADEQUATE. That rule also limits evidence text written to mislead the model.
 
 ## 4. Real-world evidence: what the tool handles
 
@@ -97,6 +131,17 @@ Ticketing tools and SAP exports are rarely as tidy as the demo file. The reader 
 
 Leadsheet counts are Excel formulas over the testing table, so decisions entered later in Excel update the leadsheet. **Export raw results** still gives the flat all-controls file from version 1.
 
+Review safeguards in the workpaper:
+- The **leadsheet** includes:
+  - a *Reliance on the tool* statement: the tool is a research prototype, so validate its rules by re-performing a few items, PASS items included;
+  - the *results fingerprint*: re-running the same files and settings must reproduce it;
+  - a cell for the D&I (walkthrough) reference;
+  - the *population completeness risks* of the control (e.g. users deleted during the period are missing from USR02, or SAP deletes old job logs), each to be addressed on the C&A sheet;
+  - a count of items cleared as "Not an exception" without a comment.
+- The **draft conclusion** never says "operated effectively" when the population is empty. When nothing was flagged, it is conditional on the C&A work, the tool validation and the review.
+- **Reviewed by** is left empty for the reviewer to sign. The reviewer named in step 1 appears as *Planned reviewer*.
+- The **Testing table**, **Population**, **Src** and **Parameters & log** sheets are protected without a password. Tool results can't be changed by accident, while yellow cells, filters and formatting stay usable.
+
 ## 6. Using real SAP data
 
 Typical sources:
@@ -123,6 +168,10 @@ Put real (anonymised) extracts in `real_data/` – git ignores that folder. Foll
 5. For the consistency measurement, set **Repeat each check (runs)** to 5.
 
 The AI part was tested with a simulated model only, not with a real one. Test it with Ollama before the experiment.
+
+Notes:
+- **Address not on this computer:** if it isn't `localhost`, the run stops and asks for explicit confirmation before any evidence text is sent. The run log and the workpaper record whether evidence left the computer.
+- **`OLLAMA_ORIGINS=*`** lets *any* web page open in your browser use the local model, not only this app. That's acceptable on a thesis or test computer. On a work computer, ask IT whether a narrower setting is needed, and turn it off when you're done.
 
 ## 8. Test data and the thesis experiment
 
@@ -156,9 +205,9 @@ Running the experiment:
 
 | Command | Checks |
 |---|---|
-| `node tests/test_engine.js` | Clean data: populations, 100% recall and precision, AI mode with a simulated model, hallucination guard, kappa |
+| `node tests/test_engine.js` | Clean data: populations, 100% recall and precision, AI mode with a simulated model, hallucination guard, kappa; the 2.1 safeguards on small hand-made cases (keyword and negation rules, AI cannot overrule a negative keyword, non-local AI refused, invalid period, results fingerprint, C1–C5 rule additions, NOT TESTED items) |
 | `node tests/test_messy.js` | Messy exports: reading, auto-mapping, date and ID formats, recall, planted REVIEW items, NOT TESTED handling, single-control scope, workpaper for every control |
-| `node tests/test_browser.js` | Clicks through the built app in headless Edge/Chrome: single-control run on messy files, workpaper download, all controls on demo data, evaluation |
+| `node tests/test_browser.js` | Clicks through the built app in headless Edge/Chrome: single-control run on messy files, workpaper download, all controls on demo data, evaluation, run log fingerprint, "Start a new engagement" wipes stored data |
 
 Each must end with "All checks passed". To regenerate the messy dataset: `node tools/make_messy_dataset.js`.
 

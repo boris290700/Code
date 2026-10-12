@@ -47,7 +47,7 @@ The app runs entirely in your browser and works offline. Files you load are **no
 
 If you see these numbers, the app works on your machine.
 
-> **Note:** settings, decisions and run history are saved in this browser only, and clearing browser data deletes them. "Run again" keeps your decisions for items whose tool result didn't change. Export the workpaper to keep your work.
+> **Note:** settings, decisions and run history are saved in this browser only, and clearing browser data deletes them. Decisions are kept per engagement (client and period): after a reload, load the same files and run again, and they come back for items whose tool result didn't change. **Start a new engagement** (step 1) deletes everything stored before you move to another client. Export the workpaper to keep your work.
 
 ### A4. Try one control with "real-world" exports
 

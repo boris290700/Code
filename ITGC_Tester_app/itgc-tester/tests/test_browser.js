@@ -87,6 +87,14 @@ const finish = code => { try { ws?.close(); } catch { } proc.kill(); setTimeout(
   await ev(`localStorage.clear(); location.reload(); return 1`); await sleep(1500);
   await click('Try the demo'); await waitFor(`document.querySelectorAll('.stat').length===6`);
   ok((await ev(`return document.querySelector('main h2').textContent`)) === 'Run tests', 'one-click demo: loads the demo data, runs all six controls and shows the results');
+  const log = await ev(`return document.querySelector('main details.card').textContent`);
+  ok(/Results fingerprint/.test(log) && /Evidence sent outside this computer\s*No/.test(log), 'run log records the results fingerprint and that no evidence left the computer');
+  // Scenario 4: "Start a new engagement" deletes everything the app stored in this browser
+  const before = await ev(`return Object.keys(localStorage).filter(k => /^itgc\\.(runlog|decisions|settings)/.test(k)).length`);
+  await nav(1); await ev(`window.confirm = () => true; return 1`); await click('Start a new engagement');
+  // (only the open/closed state of the "How this step works" boxes may be saved again – no client data)
+  const after = await ev(`return Object.keys(localStorage).filter(k => k.startsWith('itgc.') && !k.startsWith('itgc.help.')).length`);
+  ok(before >= 2 && after === 0 && !(await ev(`return document.querySelector('nav').textContent`)).includes('7 of 7'), `new engagement: stored settings, decisions and run history deleted (${before} → ${after} stored items)`);
   ok(!errors.length, 'no JavaScript errors in the page' + (errors.length ? ': ' + errors.join(' | ').slice(0, 500) : ''));
   console.log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed');
   finish(failures ? 1 : 0);

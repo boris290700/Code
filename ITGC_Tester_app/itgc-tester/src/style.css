@@ -140,6 +140,7 @@ tbody tr:hover td{background:#fafbfe}
 td.ticks{white-space:nowrap}
 tr.r-EXCEPTION td:first-child{box-shadow:inset 3px 0 0 var(--exc)}
 tr.r-REVIEW td:first-child{box-shadow:inset 3px 0 0 #e0a106}
+tr.r-NOTTESTED td:first-child{box-shadow:inset 3px 0 0 var(--nt)}
 tr.r-PASS td:first-child{box-shadow:inset 3px 0 0 #9fd3b3}
 td select{min-width:170px}
 td textarea{min-height:38px;min-width:190px}
@@ -195,14 +196,14 @@ details summary{cursor:pointer;color:var(--brand);font-weight:600}
 .stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow)}
 .stat .t{font-size:15px;font-weight:700;color:var(--ink)}
 .stat .small{margin-top:2px}
-.nums{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0 10px}
+.nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:8px;margin:14px 0 10px}
 .num{border-radius:10px;padding:10px 12px}
 .num b{display:block;font-size:24px;line-height:1.1}
 .num span{font-size:12px;font-weight:600}
-.num.exc{background:var(--exc-bg);color:var(--exc)}.num.rev{background:var(--rev-bg);color:var(--rev)}.num.pass{background:var(--pass-bg);color:var(--pass)}
+.num.exc{background:var(--exc-bg);color:var(--exc)}.num.rev{background:var(--rev-bg);color:var(--rev)}.num.pass{background:var(--pass-bg);color:var(--pass)}.num.nt{background:var(--nt-bg);color:var(--nt)}
 .bar{display:flex;height:8px;border-radius:6px;overflow:hidden;background:#eef0f4;margin-bottom:12px}
 .bar i{display:block;height:100%}
-.bar .b-exc{background:#d9483b}.bar .b-rev{background:#e8a317}.bar .b-pass{background:#3fb06e}
+.bar .b-exc{background:#d9483b}.bar .b-rev{background:#e8a317}.bar .b-pass{background:#3fb06e}.bar .b-nt{background:#d4b106}
 .attrs{border-top:1px solid var(--line);padding-top:10px;margin-top:4px}
 .attrs .a{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:3px 0}
 .attrs .a .chips{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}

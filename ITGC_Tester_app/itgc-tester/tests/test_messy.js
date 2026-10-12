@@ -72,14 +72,21 @@ let failures = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m
   const mp3 = I.mapEntities(sheets, S3, I.controlEntities(['C1']));
   const run3 = await I.runControls(mp3.entities, S3, { avail: mp3.avail, controls: ['C1'] });
   ok(run3.skipped.length === 1 && /Created on/.test(run3.skipped[0].reason) && !run3.items.length, 'user creation date not mapped → C1 not run, with the reason');
+  const S4 = I.clone(S); S4.mapping.users.fields.created_by = '';
+  const mp4 = I.mapEntities(sheets, S4, I.controlEntities(['C1']));
+  const run4 = await I.runControls(mp4.entities, S4, { avail: mp4.avail, controls: ['C1'] });
+  ok(run4.limitations.C1.some(l => l.id === 'C' && l.partial) && !run4.items.some(i => i.attributes.some(a => a.id === 'C' && a.result === 'NOT TESTED')), 'creator not in extract → C1-C still tested, independence part reported as a limitation');
 
   // --- workpapers ---
   run.id = 'run-test'; run.started = '2026-01-20 10:00:00'; run.log = { 'Run ID': run.id, 'Settings fingerprint': 'test' };
   for (const c of I.CONTROL_IDS) {
     const wb = W.build(c, { run, settings: S, decisions: {}, checks, mapped: mp, files, auditor: 'TEST', entities: mp.entities, ITGC: I, XLSX_LITE: X });
-    const back = await X.readXlsx(X.writeBook(wb));
+    const bytes = X.writeBook(wb), back = await X.readXlsx(bytes);
     const names = Object.keys(back);
     ok(['Leadsheet', 'C&A', 'Population', 'Testing table', 'Exceptions', 'Parameters & log'].every(n => names.includes(n)) && back['Testing table'].length === pops[c], `${c} workpaper: leadsheet, C&A, population, testing table (${pops[c]} rows), exceptions, ${names.filter(n => n.startsWith('Src')).length} source sheet(s)`);
+    // The workbook is stored uncompressed, so its XML can be searched directly.
+    const xml = Buffer.from(bytes).toString('utf8');
+    if (c === 'C1') ok(Object.keys(back['Testing table'][0]).includes('Decided by / on') && (xml.match(/<sheetProtection /g) || []).length >= 4 && /<protection locked="0"\/>/.test(xml) && /Reliance on the tool/.test(xml) && /Population completeness risks/.test(xml), 'workpaper: decision audit trail column, tool-output sheets protected (input cells open), tool-reliance and completeness-risk sections');
   }
   console.log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed');
   process.exit(failures ? 1 : 0);

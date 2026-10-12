@@ -284,20 +284,22 @@ const XLSX_LITE = (() => {
     ['inputc', 0, 3, 1, 0, WC], ['numbold', 1, 9, 1, 1, '<alignment vertical="top"/>'], ['plaindate', 0, 0, 0, 14, ''], ['noteline', 5, 0, 0, 0, ''],
   ];
   const SID = Object.fromEntries(STYLES.map((s, i) => [s[0], i]));
+  // Yellow input cells stay editable when a sheet is protected; all other cells are locked.
+  const UNLOCKED = new Set(['input', 'inputc']);
   // Writes the list of styles in the XML format Excel expects (styles.xml).
   const stylesXml = () => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
     `<fonts count="${FONTS.length}">${FONTS.join('')}</fonts>` +
     `<fills count="${FILLS.length}">${FILLS.map(f => f.length < 8 ? `<fill><patternFill patternType="${f}"/></fill>` : `<fill><patternFill patternType="solid"><fgColor rgb="${f}"/><bgColor indexed="64"/></patternFill></fill>`).join('')}</fills>` +
     '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border></borders>' +
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-    `<cellXfs count="${STYLES.length}">${STYLES.map(([, f, fi, b, nf, al]) => `<xf numFmtId="${nf}" fontId="${f}" fillId="${fi}" borderId="${b}" xfId="0"${f ? ' applyFont="1"' : ''}${fi ? ' applyFill="1"' : ''}${b ? ' applyBorder="1"' : ''}${nf ? ' applyNumberFormat="1"' : ''}${al ? ' applyAlignment="1">' + al + '</xf>' : '/>'}`).join('')}</cellXfs>` +
+    `<cellXfs count="${STYLES.length}">${STYLES.map(([n, f, fi, b, nf, al]) => { const pr = UNLOCKED.has(n) ? '<protection locked="0"/>' : '', kids = al + pr; return `<xf numFmtId="${nf}" fontId="${f}" fillId="${fi}" borderId="${b}" xfId="0"${f ? ' applyFont="1"' : ''}${fi ? ' applyFill="1"' : ''}${b ? ' applyBorder="1"' : ''}${nf ? ' applyNumberFormat="1"' : ''}${al ? ' applyAlignment="1"' : ''}${pr ? ' applyProtection="1"' : ''}${kids ? '>' + kids + '</xf>' : '/>'}`; }).join('')}</cellXfs>` +
     '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
 
   // writeBook creates a complete workbook. For every sheet it writes: column widths, frozen
   // header rows, all cells (text, numbers, dates, formulas), merged cells, auto-filter, dropdown
   // lists (data validation) and print settings (landscape, fit to page width).
   // Low-level writer. sheets: [{ name, rows: [[cell]], widths?: [n], merges?: ['A1:D1'], freeze?: 'A2',
-  //   filter?: 'A1:F9', validations?: [{ sqref, list: [..] }], landscape?: bool, tab?: 'FF1F4E79' }]
+  //   filter?: 'A1:F9', validations?: [{ sqref, list: [..] }], landscape?: bool, tab?: 'FF1F4E79', protect?: bool }]
   // cell: value | { v, s: styleName, f: formula }. Dates: pass { v: Date|ISO string, s: 'date' }.
   function writeBook(sheets) {
     const files = [];
@@ -342,6 +344,9 @@ const XLSX_LITE = (() => {
         x += `<row r="${ri + 1}"${ht ? ` ht="${ht}" customHeight="1"` : ''}>${cells.join('')}</row>`;
       });
       x += '</sheetData>';
+      // Sheet protection without a password: guards the tool's results against accidental edits.
+      // Filtering, sorting and formatting stay allowed; yellow input cells are not locked.
+      if (s.protect) x += '<sheetProtection sheet="1" objects="1" scenarios="1" formatCells="0" formatColumns="0" formatRows="0" autoFilter="0" sort="0"/>';
       if (s.filter) x += `<autoFilter ref="${s.filter}"/>`;
       if (s.merges?.length) x += `<mergeCells count="${s.merges.length}">${s.merges.map(m => `<mergeCell ref="${m}"/>`).join('')}</mergeCells>`;
       // Dropdown lists, e.g. "Confirmed exception / Not an exception / More information needed".

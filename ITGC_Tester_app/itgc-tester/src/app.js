@@ -74,8 +74,16 @@
     mapped: null, checks: null, run: null, decisions: {}, auditor: store.get('auditor', ''), evalAuto: null, evalManual: null, key: null, manual: null, notes: [],
   };
   // keep any newly added default fields when an older saved settings object is loaded
-  const merge = (d, s) => { if (typeof d !== 'object' || d === null || Array.isArray(d)) return s === undefined ? d : s; const o = { ...d }; for (const k of Object.keys(s || {})) o[k] = merge(d[k], s[k]); return o; };
+  // (names like "__proto__" in a settings file are ignored – they could tamper with the program)
+  const merge = (d, s) => { if (typeof d !== 'object' || d === null || Array.isArray(d)) return s === undefined ? d : s; const o = { ...d }; for (const k of Object.keys(s || {})) if (!['__proto__', 'constructor', 'prototype'].includes(k)) o[k] = merge(d[k], s[k]); return o; };
   state.settings = merge(I.DEFAULT_SETTINGS, state.settings);
+  // Housekeeping: older versions saved decisions per run ("decisions.run-…") and never read them
+  // back – client data kept for no purpose. They are deleted when the app starts.
+  try { Object.keys(localStorage).filter(k => k.startsWith('itgc.decisions.run-')).forEach(k => localStorage.removeItem(k)); } catch { }
+  // Review decisions are saved for the current engagement (client + period) only, so they survive
+  // a page reload but are never carried into another client's run.
+  const engKey = () => `${state.settings.engagement.client}|${state.settings.period.start}|${state.settings.period.end}`;
+  const saveDecisions = () => store.set('decisions', { scope: engKey(), items: state.decisions });
   // Short helpers: save the settings; "scope" = controls ticked in step 1; "needed" = all evidence
   // those controls use; "required" = evidence they cannot run without; "reset" = forget results
   // that are no longer valid after something changed (e.g. a new file means mapping again).
@@ -172,10 +180,10 @@
       h('div', { class: 'steps3' }, h('span', {}, h('b', {}, '1'), 'Choose controls'), h('span', {}, h('b', {}, '2'), 'Add files'), h('span', {}, h('b', {}, '3'), 'Run'), h('span', {}, h('b', {}, '4'), 'Review & download'))),
       h('button', { class: 'btn big', onclick: quickDemo }, ico('star'), 'Try the demo')));
     m.append(helpBox(1, ['Fill in the engagement details – they appear on every workpaper.', 'Tick the controls you want to test. Each card shows what is checked and which files are needed.', 'Click "Next" at the bottom to add the files.']));
-    m.append(h('div', { class: 'card' }, h('h3', {}, 'Engagement'), h('p', { class: 'sub' }, 'Shown in the header of every workpaper.'), h('div', { class: 'row' },
+    m.append(h('div', { class: 'card' }, h('div', { class: 'row', style: 'justify-content:space-between' }, h('h3', {}, 'Engagement'), h('button', { class: 'btn ghost small', onclick: newEngagement, title: 'Deletes all settings, decisions and run history stored in this browser' }, 'Start a new engagement')), h('p', { class: 'sub' }, 'Shown in the header of every workpaper.'), I.periodError(S) ? msg('err', I.periodError(S)) : null, h('div', { class: 'row' },
       field('Client / entity', txt(E, 'client')), field('System in scope', txt(E, 'system')),
-      field('Period from', h('input', { type: 'date', value: S.period.start, onchange: e => { S.period.start = e.target.value; saveSettings(); reset(); } }), 'max-width:180px'),
-      field('Period to', h('input', { type: 'date', value: S.period.end, onchange: e => { S.period.end = e.target.value; saveSettings(); reset(); } }), 'max-width:180px')),
+      field('Period from', h('input', { type: 'date', value: S.period.start, onchange: e => { S.period.start = e.target.value; saveSettings(); reset(); go(1); } }), 'max-width:180px'),
+      field('Period to', h('input', { type: 'date', value: S.period.end, onchange: e => { S.period.end = e.target.value; saveSettings(); reset(); go(1); } }), 'max-width:180px')),
       h('div', { class: 'row', style: 'margin-top:12px' }, field('Prepared by (your name or initials)', h('input', { type: 'text', value: state.auditor, placeholder: 'e.g. J. Smith', oninput: e => { state.auditor = e.target.value; store.set('auditor', state.auditor); } }), 'max-width:280px'),
         field('Reviewer (optional)', txt(E, 'reviewer'), 'max-width:280px'), field('Workpaper reference prefix', txt(E, 'wp_prefix'), 'max-width:220px'))));
     const grid = h('div', { class: 'grid2' });
@@ -192,6 +200,15 @@
     m.append(h('div', { class: 'card' }, h('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:12px' }, h('div', {}, h('h3', {}, 'Controls to test'), h('p', { class: 'sub', style: 'margin:0' }, `${scope().length} of ${I.CONTROL_IDS.length} selected`)),
       h('div', { class: 'row' }, h('button', { class: 'btn secondary small', onclick: () => { I.CONTROL_IDS.forEach(c => S.controls[c].enabled = true); saveSettings(); reset(); go(1); } }, 'Select all'), h('button', { class: 'btn secondary small', onclick: () => { I.CONTROL_IDS.forEach(c => S.controls[c].enabled = false); saveSettings(); reset(); go(1); } }, 'Clear'))), grid));
     actionBar(m, null, [2, 'Load evidence', scope().length > 0, 'Select at least one control']);
+  }
+  // NEW ENGAGEMENT: deletes everything this app stored in the browser (settings with client
+  // approver lists and mappings, review decisions, run history) and empties the screens, so
+  // nothing from one client is carried into the next engagement (confidentiality, GDPR).
+  function newEngagement() {
+    if (!confirm('Start a new engagement?\n\nThis deletes everything the app stored in this browser: settings and mappings (incl. client approver lists), review decisions and the run history. Export the workpapers and the settings file first if you still need them.')) return;
+    try { Object.keys(localStorage).filter(k => k.startsWith('itgc.')).forEach(k => localStorage.removeItem(k)); } catch { }
+    Object.assign(state, { files: [], sheets: {}, settings: I.clone(I.DEFAULT_SETTINGS), mapped: null, checks: null, run: null, decisions: {}, auditor: '', evalAuto: null, evalManual: null, key: null, manual: null, notes: [] });
+    go(1); toast('New engagement started – stored data deleted');
   }
   // One-click demo: select all controls, load the built-in demo data, run all tests, show results.
   async function quickDemo() {
@@ -370,7 +387,7 @@
       C1: () => [listIn(C.C1, 'authorised_approvers', 'Who may approve new access (empty = anyone except the creator)'), listIn(C.C1, 'approved_status', 'Ticket status that means "approved"'), listIn(C.C1, 'user_types', 'User types in scope (A = dialog)'), listIn(C.C1.approval_text, 'positive', 'Comment words that suggest an approval (no approver field → REVIEW)'), listIn(C.C1.approval_text, 'negative', 'Comment words that do not count as approval')],
       C2: () => [numIn(C.C2, 'max_days', 'Maximum days from leaving to account lock'), listIn(C.C2, 'lock_events', 'Lock history: words meaning "locked"'), listIn(C.C2, 'unlock_events', 'Lock history: words meaning "unlocked"')],
       C3: () => [listIn(C.C3, 'privileged_profiles', 'Profiles / roles that count as privileged'), listIn(C.C3, 'user_types', 'User types in scope')],
-      C4: () => [listIn(C.C4, 'emergency_types', 'Change types that are emergency changes'), txtIn(C.C4, 'ref_pattern', 'Pattern of a change number in transport descriptions (advanced)'), listIn(C.C4.text, 'positive', 'Words that show business testing'), listIn(C.C4.text, 'negative', 'Words that show missing testing')],
+      C4: () => [listIn(C.C4, 'emergency_types', 'Change types that are emergency changes'), numIn(C.C4, 'emergency_max_days', 'Emergency change: max. days from import to post-approval (0 = not checked)'), txtIn(C.C4, 'ref_pattern', 'Pattern of a change number in transport descriptions (advanced)'), listIn(C.C4.text, 'positive', 'Words that show business testing'), listIn(C.C4.text, 'negative', 'Words that show missing testing')],
       C5: () => [listIn(C.C5, 'technical_import_users', 'Technical import users (sent to review)')],
       C6: () => [listIn(C.C6, 'failed_status', 'Job status that means "failed"'), listIn(C.C6, 'closed_status', 'Incident status that means "resolved"'), numIn(C.C6, 'link_days', 'Days to link an incident by job name'), listIn(C.C6.text, 'positive', 'Words that show a real fix'), listIn(C.C6.text, 'negative', 'Words that show no real fix')],
     };
@@ -392,13 +409,15 @@
         const res = h('span', { class: 'small' });
         aiBox.append(h('div', { class: 'fgrid', style: 'margin-top:12px' },
           field('Provider', h('select', { onchange: e => { ai.provider = e.target.value; saveSettings(); } }, h('option', { value: 'ollama', selected: ai.provider === 'ollama' || null }, 'Ollama (local)'), h('option', { value: 'openai', selected: ai.provider === 'openai' || null }, 'OpenAI-compatible API'))),
-          txtIn(ai, 'url', 'Address'), txtIn(ai, 'model', 'Model name'), txtIn(ai, 'api_key', 'API key (if needed)', 'password'), numIn(ai, 'runs', 'Repeat each check (runs)')),
+          field('Address', txt(ai, 'url', () => { reset('run'); drawAi(); })), txtIn(ai, 'model', 'Model name'), txtIn(ai, 'api_key', 'API key (if needed)', 'password'), numIn(ai, 'runs', 'Repeat each check (runs)')),
           h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn secondary', onclick: async () => { res.textContent = 'Testing…'; const r = await I.llmCheck('C4', 'UAT passed, sign-off by key user attached.', ai); res.textContent = r.source === 'llm-error' ? '✗ ' + r.reason : `✓ Model answered: ${r.label} – ${r.reason}`; } }, 'Test connection'), res),
+          I.isLocalUrl(ai.url) ? null : msg('err', h('b', {}, 'This address is not on this computer. '), 'The evidence texts would leave your computer. The run asks for your explicit confirmation and records it in the run log and workpaper.'),
           msg('warn', 'Confidentiality: with a cloud API the ticket texts leave your computer. Use a local model (Ollama) for real client data, or only use synthetic data. With Ollama, start it with the environment variable OLLAMA_ORIGINS=* so this page may call it (see the guide).'));
       }
     };
     drawAi();
-    m.append(h('div', { class: 'card' }, h('h3', {}, ico('file'), 'Written notes'), h('p', { class: 'sub' }, 'Some attributes depend on text, e.g. "UAT passed, sign-off attached". Unclear texts always go to you for review.'), aiBox));
+    m.append(h('div', { class: 'card' }, h('h3', {}, ico('file'), 'Written notes'), h('p', { class: 'sub' }, 'Some attributes depend on text, e.g. "UAT passed, sign-off attached". Unclear texts always go to you for review.'), aiBox,
+      h('div', { style: 'margin-top:12px' }, listIn(S, 'negation_words', 'Negation words – positive wording plus one of these (e.g. "UAT not performed") goes to REVIEW'))));
     m.append(h('div', { class: 'card' }, h('h3', {}, ico('table'), 'Date format'), h('div', { class: 'row' }, field('Dates like 03/04/2025 mean…', h('select', { onchange: e => { S.date_order = e.target.value; saveSettings(); reset(); } }, ...[['auto', 'Detect automatically (default: day/month)'], ['DMY', 'Day/month/year (Europe)'], ['MDY', 'Month/day/year (US)']].map(([v, t]) => h('option', { value: v, selected: S.date_order === v || null }, t))), 'max-width:380px'))));
     const fin = h('input', { type: 'file', accept: '.json', style: 'display:none', onchange: async e => { try { state.settings = merge(I.DEFAULT_SETTINGS, JSON.parse(await e.target.files[0].text())); saveSettings(); reset(); go(4); toast('Settings loaded'); } catch (err) { alert('Not a valid settings file: ' + err.message); } } });
     m.append(h('div', { class: 'card' }, h('h3', {}, ico('download'), 'Settings file'), h('p', { class: 'sub' }, 'Keep the settings with the audit documentation, or reuse them next year.'), h('div', { class: 'row' },
@@ -411,34 +430,53 @@
   // ---------- Step 5: run ----------
   // RUN: executes the control tests (engine.runControls) on the mapped evidence, shows a progress
   // bar while free texts are assessed, then writes a run log entry (run ID, time, auditor, tool
-  // version, settings fingerprint, file fingerprints, counts, run time).
+  // version, settings fingerprint, file fingerprints, results fingerprint, counts, run time).
   async function doRun(m) {
     if (!state.checks) doMap();
+    const S = state.settings;
+    // Safety stops before testing: the audit period must be valid, and evidence texts may only go
+    // to a language model outside this computer after the auditor's explicit confirmation.
+    const pErr = I.periodError(S);
+    if (pErr) { alert(pErr); go(1); return; }
+    let external = false;
+    if (S.ai.mode === 'llm' && !I.isLocalUrl(S.ai.url)) {
+      if (!confirm(`The language model address ${S.ai.url} is NOT on this computer.\n\nThe written notes in the evidence (test evidence, incident resolutions) would be sent to that service. Continue only with synthetic data, or with the client's written approval and your firm's approval of the service.\n\nSend the texts?`)) return;
+      external = true;
+    }
     const bar = h('div'), prog = h('div', { class: 'progress' }, bar), note = h('p', { class: 'small muted', style: 'margin:0' }, 'Testing…');
     const box = h('div', { class: 'card' }, h('h3', {}, 'Testing in progress'), note, prog);
     const anchor = m.querySelector('.runbox')?.closest('.card');
     if (anchor) anchor.after(box); else m.append(box);
     const t0 = performance.now();
-    const run = await I.runControls(state.mapped.entities, state.settings, { avail: state.mapped.avail, controls: scope(), progress: (a, b) => { bar.style.width = (100 * a / b) + '%'; note.textContent = `Reading written notes ${a} / ${b}…`; } });
+    const run = await I.runControls(state.mapped.entities, S, { avail: state.mapped.avail, controls: scope(), allowExternalAI: external, progress: (a, b) => { bar.style.width = (100 * a / b) + '%'; note.textContent = `Reading written notes ${a} / ${b}…`; } });
     run.seconds = (performance.now() - t0) / 1000;
     run.id = 'run-' + Date.now();
     run.started = today();
     run.consistency = I.runConsistency(run.textRuns);
+    // Parameter warnings (e.g. empty approver list), plus a reminder if the demo client name is
+    // still entered while real files are loaded.
+    run.warnings = I.settingsWarnings(S, run.controls);
+    if (S.engagement.client === I.DEFAULT_SETTINGS.engagement.client && state.files.some(f => f.name !== 'ITGC_synthetic_evidence_FY2025.xlsx')) run.warnings.push(`The client name is still the demo value "${S.engagement.client}". Correct it in step 1 – it is printed on every workpaper.`);
     const cnt = r => run.items.filter(i => i.result === r).length;
-    const settingsHash = await I.sha256(new TextEncoder().encode(JSON.stringify({ ...state.settings, ai: { ...state.settings.ai, api_key: '' } })));
-    run.log = { 'Run ID': run.id, Timestamp: run.started, Auditor: state.auditor || '(not entered)', 'Tool version': I.VERSION, 'Controls': run.controls.join(', '), 'Settings fingerprint': settingsHash.slice(0, 16), 'Period': state.settings.period.start + ' to ' + state.settings.period.end, 'Text assessment': state.settings.ai.mode === 'llm' ? `LLM ${state.settings.ai.provider} / ${state.settings.ai.model} x${state.settings.ai.runs}` : 'Keyword rules', 'Input files': state.files.map(f => `${f.name} [sha256 ${f.sha256}]`).join('; '), 'Items tested': run.items.length, Exceptions: cnt('EXCEPTION'), 'Requires review': cnt('REVIEW'), 'Run time (s)': +run.seconds.toFixed(2) };
+    const settingsHash = await I.sha256(new TextEncoder().encode(JSON.stringify({ ...S, ai: { ...S.ai, api_key: '' } })));
+    const resultsHash = await I.resultsFingerprint(run);
+    run.log = { 'Run ID': run.id, Timestamp: run.started, Auditor: state.auditor || '(not entered)', 'Tool version': I.VERSION, 'Controls': run.controls.join(', '), 'Settings fingerprint': settingsHash.slice(0, 16), 'Results fingerprint': resultsHash.slice(0, 16), 'Period': S.period.start + ' to ' + S.period.end, 'Text assessment': S.ai.mode === 'llm' ? `LLM ${S.ai.provider} / ${S.ai.model} x${S.ai.runs}` : 'Keyword rules', 'Evidence sent outside this computer': external ? `Yes – to ${S.ai.url} (confirmed by the auditor)` : 'No', 'Input files': state.files.map(f => `${f.name} [sha256 ${f.sha256}]`).join('; '), 'Items tested': run.items.length, Exceptions: cnt('EXCEPTION'), 'Requires review': cnt('REVIEW'), 'Not tested': cnt('NOT TESTED'), 'Settings warnings': run.warnings.join(' | ') || 'None', 'Run time (s)': +run.seconds.toFixed(2) };
     const logs = store.get('runlog', []); logs.push(run.log); store.set('runlog', logs.slice(-200));
-    // Decisions from the previous run are kept for items whose tool result did not change.
-    const prev = state.run, prevDec = state.decisions, keep = {};
-    if (prev) for (const it of run.items) { const k = it.control + '|' + it.record_id, old = prev.items.find(x => x.control === it.control && x.record_id === it.record_id); if (old && old.result === it.result && prevDec[k]) keep[k] = prevDec[k]; }
-    state.run = run; state.decisions = keep; store.set('decisions.' + run.id, keep);
+    // Decisions are carried over – from the previous run, or from this browser's storage after a
+    // page reload – for items whose tool result did not change, within the same engagement only.
+    // Decisions on controls that were not part of this run are kept as they are.
+    const stored = store.get('decisions', null);
+    const pool = { ...(stored?.scope === engKey() ? stored.items : {}), ...state.decisions }, keep = {};
+    for (const it of run.items) { const k = it.control + '|' + it.record_id; if (pool[k]?.result === it.result) keep[k] = pool[k]; }
+    for (const [k, d] of Object.entries(pool)) if (!run.controls.includes(k.split('|')[0])) keep[k] = d;
+    state.run = run; state.decisions = keep; saveDecisions();
     go(5);
   }
   // Screen 5 – RUN TESTS: the run button, warnings for controls that could not run or attributes
   // that could not be tested, one result card per control (big numbers, a coloured bar and the
   // counts per attribute), and the technical run log.
   function viewRun(m) {
-    pageHead(m, 5, 'The tool checks every item of the population against every attribute – no sampling. Each item gets PASS, EXCEPTION or REVIEW.');
+    pageHead(m, 5, 'The tool checks every item of the population against every attribute – no sampling. Each item gets PASS, EXCEPTION or REVIEW (or NOT TESTED if the evidence lacks every field it needs).');
     if (!state.files.length) { m.append(msg('warn', 'No files yet. ', h('a', { href: '#', onclick: e => { e.preventDefault(); go(2); } }, 'Go to step 2 to add them.'))); actionBar(m, 2, null); return; }
     m.append(helpBox(5, ['Click the run button. It takes a few seconds (longer with the AI option).', 'Read the result card of each control: red = exceptions, amber = items you need to review, green = passed.', 'Continue to "Review & export" to decide on the flagged items and download the workpapers.']));
     const r = state.run;
@@ -448,19 +486,23 @@
       h('button', { class: 'btn big' + (r ? ' secondary' : ''), onclick: () => doRun(m) }, ico('play'), r ? 'Run again' : `Run tests (${scope().join(', ')})`))));
     if (!r) { actionBar(m, 3, [6, 'Review & export', false, 'Run the tests first']); return; }
     for (const s of r.skipped) m.append(msg('err', h('b', {}, `${s.control} could not run. `), s.reason.replace('Missing evidence:', 'Missing:') + '. Add the file in step 2 or check the columns in step 3.'));
-    for (const [c, l] of Object.entries(r.limitations || {})) for (const x of l) m.append(msg('warn', h('b', {}, `${c} attribute ${x.id} (${x.name}) was not tested. `), `The files do not contain ${x.missing.join(', ')}. Test it manually – these cells are yellow (N/T) in the workpaper.`));
+    for (const w of r.warnings || []) m.append(msg('warn', h('b', {}, 'Check the settings. '), w));
+    for (const [c, l] of Object.entries(r.limitations || {})) for (const x of l) m.append(msg('warn', h('b', {}, `${c} attribute ${x.id} (${x.name}) was ${x.partial ? 'only partly' : 'not'} tested. `), `The files do not contain ${x.missing.join(', ')}. ${x.partial ? 'Test that part manually – the workpaper leadsheet lists it as a limitation.' : 'Test it manually – these cells are yellow (N/T) in the workpaper.'}`));
     const g = h('div', { class: 'grid' });
     for (const c of r.controls) {
       const its = r.items.filter(i => i.control === c), n = x => its.filter(i => i.result === x).length, tot = its.length || 1;
+      const nFlag = n('EXCEPTION') + n('REVIEW') + n('NOT TESTED');
       const attrs = CTRL[c].attributes.map(a => {
         const chips = ['EXCEPTION', 'REVIEW', 'NOT TESTED'].map(res => [res, its.filter(i => i.attributes.some(x => x.id === a.id && x.result === res)).length]).filter(([, k]) => k).map(([res, k]) => h('span', { class: 'chip ' + res.replace(/ /g, '') }, `${k} ${{ EXCEPTION: k > 1 ? 'exceptions' : 'exception', REVIEW: 'to review', 'NOT TESTED': 'not tested' }[res]}`));
         return h('div', { class: 'a' }, h('span', {}, `${a.id}. ${a.name}`), h('span', { class: 'chips' }, chips.length ? chips : h('span', { class: 'chip PASS' }, ico('check'), 'all met')));
       });
       g.append(h('div', { class: 'stat' }, h('div', { class: 't' }, `${c} – ${state.settings.controls[c].name}`), h('div', { class: 'small muted' }, `Population ${its.length} · coverage 100%`),
-        h('div', { class: 'nums' }, h('div', { class: 'num exc' }, h('b', {}, n('EXCEPTION')), h('span', {}, 'exceptions')), h('div', { class: 'num rev' }, h('b', {}, n('REVIEW')), h('span', {}, 'to review')), h('div', { class: 'num pass' }, h('b', {}, n('PASS')), h('span', {}, 'passed'))),
-        h('div', { class: 'bar' }, h('i', { class: 'b-exc', style: `width:${n('EXCEPTION') / tot * 100}%` }), h('i', { class: 'b-rev', style: `width:${n('REVIEW') / tot * 100}%` }), h('i', { class: 'b-pass', style: `width:${n('PASS') / tot * 100}%` })),
+        h('div', { class: 'nums' }, h('div', { class: 'num exc' }, h('b', {}, n('EXCEPTION')), h('span', {}, 'exceptions')), h('div', { class: 'num rev' }, h('b', {}, n('REVIEW')), h('span', {}, 'to review')), n('NOT TESTED') ? h('div', { class: 'num nt' }, h('b', {}, n('NOT TESTED')), h('span', {}, 'not tested')) : null, h('div', { class: 'num pass' }, h('b', {}, n('PASS')), h('span', {}, 'passed'))),
+        h('div', { class: 'bar' }, h('i', { class: 'b-exc', style: `width:${n('EXCEPTION') / tot * 100}%` }), h('i', { class: 'b-rev', style: `width:${n('REVIEW') / tot * 100}%` }), h('i', { class: 'b-nt', style: `width:${n('NOT TESTED') / tot * 100}%` }), h('i', { class: 'b-pass', style: `width:${n('PASS') / tot * 100}%` })),
+        // An empty population is not "no exceptions": the control could not be tested at all.
+        its.length ? null : msg('warn', h('b', {}, 'Empty population. '), 'Confirm independently that there were no items in the period and that the extract and the period are right. With no occurrences, the control cannot be concluded as operating effectively.'),
         h('div', { class: 'attrs' }, attrs),
-        n('EXCEPTION') + n('REVIEW') ? h('button', { class: 'btn secondary small', onclick: () => { store.set('reviewFilter', { control: c, result: 'flagged', q: '' }); go(6); } }, `Review ${n('EXCEPTION') + n('REVIEW')} flagged items`, ico('right')) : null));
+        nFlag ? h('button', { class: 'btn secondary small', onclick: () => { store.set('reviewFilter', { control: c, result: 'flagged', q: '' }); go(6); } }, `Review ${nFlag} flagged items`, ico('right')) : null));
     }
     m.append(g);
     const info = h('details', { class: 'card', style: 'margin-top:18px' }, h('summary', {}, 'Technical run log (recorded in the workpaper)'), h('div', { class: 'tablewrap', style: 'margin-top:12px' }, h('table', {}, ...Object.entries(r.log).map(([k, v]) => h('tr', {}, h('th', { style: 'width:200px;position:static' }, k), h('td', { class: 'small' }, String(v)))))));
@@ -482,11 +524,14 @@
   function viewReview(m) {
     pageHead(m, 6, 'Decide on every item the tool flagged, then download the workpapers for the audit file.');
     const r = state.run; if (!r) { m.append(msg('warn', 'Run the tests first. ', h('a', { href: '#', onclick: e => { e.preventDefault(); go(5); } }, 'Go to step 5.'))); actionBar(m, 5, null); return; }
-    m.append(helpBox(6, ['For each flagged item, open the details to see why it was flagged.', 'Choose your decision: "Confirmed exception", "Not an exception" or "More information needed", and add a short comment.', 'Download the workpaper of each control. Your decisions are included – you can also finish them later in Excel.']));
+    m.append(helpBox(6, ['For each flagged item, open the details to see why it was flagged.', 'Choose your decision: "Confirmed exception", "Not an exception" or "More information needed", and add a short comment. "Not an exception" always needs the reason in the comment.', 'Download the workpaper of each control. Your decisions (with your name and the time) are included – you can also finish them later in Excel.']));
     const flagged = r.items.filter(i => i.result !== 'PASS');
-    const decided = () => flagged.filter(i => state.decisions[i.control + '|' + i.record_id]?.decision).length;
+    // An item counts as concluded when it is a confirmed exception, or "Not an exception" WITH a
+    // reason. Clearing a tool flag without documented rationale is a classic review point.
+    const noReason = d => d?.decision === 'Not an exception' && !String(d.comment || '').trim();
+    const concluded = () => flagged.filter(i => { const d = state.decisions[i.control + '|' + i.record_id]; return ['Confirmed exception', 'Not an exception'].includes(d?.decision) && !noReason(d); }).length;
     const progBar = h('div'), progTxt = h('b', {});
-    const updateProg = () => { const d = decided(); progBar.style.width = (flagged.length ? d / flagged.length * 100 : 100) + '%'; progTxt.textContent = flagged.length ? `${d} of ${flagged.length} flagged items decided` : 'Nothing was flagged – no decisions needed'; };
+    const updateProg = () => { const d = concluded(), nr = flagged.filter(i => noReason(state.decisions[i.control + '|' + i.record_id])).length; progBar.style.width = (flagged.length ? d / flagged.length * 100 : 100) + '%'; progTxt.textContent = flagged.length ? `${d} of ${flagged.length} flagged items concluded${nr ? ` · ${nr} cleared without a reason` : ''}` : 'Nothing was flagged – no decisions needed'; };
     updateProg();
     m.append(h('div', { class: 'card' }, h('h3', {}, ico('clipboard'), 'Your review'), h('div', { class: 'reviewprog', style: 'margin:10px 0 16px' }, progTxt, h('div', { class: 'progress' }, progBar)),
       h('h3', { style: 'margin-top:4px' }, ico('download'), 'Workpapers', tip('One Excel file per control: Leadsheet (summary and conclusion), C&A, Population, Testing table with tickmarks, Exceptions, source data and run log. Yellow cells are for you to complete.')),
@@ -506,11 +551,17 @@
       count.textContent = `${rows.length} item(s)`;
       for (const i of rows.slice(0, 1000)) {
         const k = i.control + '|' + i.record_id, d = state.decisions[k] || { decision: '', comment: '' };
-        const save = () => { state.decisions[k] = d; store.set('decisions.' + r.id, state.decisions); renderNav(); updateProg(); };
-        body.append(h('tr', { class: 'r-' + i.result }, h('td', {}, h('b', {}, i.record_id), h('div', { class: 'small muted' }, i.control)), h('td', {}, chip(i.result)),
+        // A hint under the decision when "Not an exception" has no reason yet.
+        const hint = h('div', { class: 'small', style: 'color:var(--exc);margin-top:4px' });
+        const updHint = () => { hint.textContent = noReason(d) ? 'Add the reason in the comment – clearing a flagged item needs documented rationale.' : ''; };
+        // Every change records who decided and when (audit trail in the workpaper), and the tool
+        // result it refers to (the decision is only carried over if that result stays the same).
+        const save = () => { d.by = state.auditor || '(name not entered)'; d.at = today().slice(0, 16); d.result = i.result; state.decisions[k] = d; saveDecisions(); renderNav(); updateProg(); updHint(); };
+        updHint();
+        body.append(h('tr', { class: 'r-' + i.result.replace(/ /g, '') }, h('td', {}, h('b', {}, i.record_id), h('div', { class: 'small muted' }, i.control)), h('td', {}, chip(i.result)),
           h('td', { class: 'ticks' }, i.attributes.map(a => h('span', { title: `${a.id}. ${a.name}: ${a.detail}` }, h('span', { class: 'small muted' }, a.id), tick(a.result)))),
           h('td', {}, h('div', {}, i.description), h('details', { open: null }, h('summary', { class: 'small' }, i.result === 'PASS' ? 'What was checked' : 'Why it was flagged'), ...i.attributes.map(a => h('div', { class: 'attr' }, tick(a.result), h('span', {}, h('b', {}, `${a.id}. ${a.name}`), ': ', a.detail))))),
-          h('td', {}, i.result === 'PASS' ? h('span', { class: 'small muted' }, 'no decision needed') : h('select', { onchange: e => { d.decision = e.target.value; save(); } }, ...DECISIONS.map(x => h('option', { value: x, selected: d.decision === x || null }, x || '– choose –')))),
+          h('td', {}, i.result === 'PASS' ? h('span', { class: 'small muted' }, 'no decision needed') : [h('select', { onchange: e => { d.decision = e.target.value; save(); } }, ...DECISIONS.map(x => h('option', { value: x, selected: d.decision === x || null }, x || '– choose –'))), hint]),
           h('td', {}, i.result === 'PASS' ? '' : h('textarea', { placeholder: 'Your comment…', onchange: e => { d.comment = e.target.value; save(); } }, d.comment))));
       }
       if (!rows.length) body.append(h('tr', {}, h('td', { colspan: 6, class: 'muted', style: 'text-align:center;padding:24px' }, 'No items match the filters.')));
@@ -518,7 +569,7 @@
     };
     m.append(h('div', { class: 'card' }, h('h3', {}, ico('table'), 'Items'), h('div', { class: 'row', style: 'margin:8px 0 12px;align-items:flex-end' },
       field('Control', h('select', { onchange: e => { f.control = e.target.value; draw(); } }, h('option', { value: '' }, 'All controls'), ...r.controls.map(c => h('option', { value: c, selected: f.control === c || null }, `${c} – ${state.settings.controls[c].name}`))), 'max-width:330px'),
-      field('Show', h('select', { onchange: e => { f.result = e.target.value; draw(); } }, ...[['flagged', 'Items to decide (exceptions + review)'], ['EXCEPTION', 'Exceptions only'], ['REVIEW', 'Review only'], ['NOT TESTED', 'With attributes not tested'], ['PASS', 'Passed items'], ['all', 'All items']].map(([v, t]) => h('option', { value: v, selected: f.result === v || null }, t))), 'max-width:290px'),
+      field('Show', h('select', { onchange: e => { f.result = e.target.value; draw(); } }, ...[['flagged', 'Items to decide (exceptions, review, not tested)'], ['EXCEPTION', 'Exceptions only'], ['REVIEW', 'Review only'], ['NOT TESTED', 'With attributes not tested'], ['PASS', 'Passed items'], ['all', 'All items']].map(([v, t]) => h('option', { value: v, selected: f.result === v || null }, t))), 'max-width:290px'),
       field('Search', h('input', { type: 'text', value: f.q, placeholder: 'User, transport, job…', oninput: e => { f.q = e.target.value; draw(); } })), count),
       h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ...['Item', 'Result', 'Attributes', 'Details', 'Your decision', 'Comment'].map(x => h('th', {}, x)))), body))));
     draw();
@@ -527,7 +578,7 @@
   // The simple all-controls export from version 1 (flat tables, no workpaper layout).
   function exportRaw() {
     const r = state.run, dec = state.decisions;
-    const flaggedRows = r.items.filter(i => i.result !== 'PASS').map(i => ({ Control: i.control, 'Record ID': i.record_id, 'Tool result': i.result, Description: i.description, Reason: i.reason, 'Auditor decision': dec[i.control + '|' + i.record_id]?.decision || '', 'Auditor comment': dec[i.control + '|' + i.record_id]?.comment || '' }));
+    const flaggedRows = r.items.filter(i => i.result !== 'PASS').map(i => ({ Control: i.control, 'Record ID': i.record_id, 'Tool result': i.result, Description: i.description, Reason: i.reason, 'Auditor decision': dec[i.control + '|' + i.record_id]?.decision || '', 'Auditor comment': dec[i.control + '|' + i.record_id]?.comment || '', 'Decided by / on': dec[i.control + '|' + i.record_id]?.decision ? `${dec[i.control + '|' + i.record_id].by || ''} ${dec[i.control + '|' + i.record_id].at || ''}`.trim() : '' }));
     const all = r.items.map(i => ({ Control: i.control, 'Record ID': i.record_id, 'Tool result': i.result, Description: i.description }));
     const attrs = r.items.flatMap(i => i.attributes.map(a => ({ Control: i.control, 'Record ID': i.record_id, Attribute: `${a.id}. ${a.name}`, Result: a.result, Detail: a.detail })));
     download(`ITGC_raw_results_${r.started.slice(0, 10)}.xlsx`, XLSX_LITE.writeXlsx([{ name: 'Flagged', rows: flaggedRows }, { name: 'All_items', rows: all }, { name: 'Attribute_results', rows: attrs }, { name: 'Data_checks', rows: (state.checks || []).map(({ entity, ...c }) => c) }, { name: 'Run_log', rows: [r.log] }, ...(r.consistency ? [{ name: 'AI_consistency', rows: [r.consistency, ...r.textRuns.map(t => ({ control: t.control, record_id: t.record_id, text: t.text, labels: t.labels.join(' / ') }))] }] : [])]), XTYPE);
